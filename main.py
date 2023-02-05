@@ -60,8 +60,8 @@ try:
   #
   #   readings["custom"] = my_reading()  # add my custom reading value
 
-  # is an upload destination set?
-  if enviro.config.destination:
+  # is an upload destination and frequency set?
+  if enviro.config.destination and enviro.config.upload_frequency >= 1:
     # if so cache this reading for upload later
     enviro.logging.debug(f"> caching reading for upload")
     enviro.cache_upload(reading)
@@ -77,6 +77,12 @@ try:
     # otherwise save reading to local csv file (look in "/readings")
     enviro.logging.debug(f"> saving reading locally")
     enviro.save_reading(reading)
+    # and upload on demand
+    if enviro.config.destination and enviro.config.upload_frequency == -1 and enviro.get_wake_reason() == enviro.constants.WAKE_REASON_BUTTON_PRESS:
+      enviro.logging.info(f"> local readings upload requested")
+      if not enviro.upload_readings_local():
+        enviro.halt("! local readings upload failed")
+            
 
   # go to sleep until our next scheduled reading
   enviro.sleep()

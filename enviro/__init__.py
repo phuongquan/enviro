@@ -314,7 +314,7 @@ def get_sensor_readings():
 def save_reading(readings):
   # open todays reading file and save readings
   helpers.mkdir_safe("readings")
-  readings_filename = f"readings/{helpers.datetime_file_string()}.txt"
+  readings_filename = f"readings/{helpers.date_string()}.txt"
   new_file = not helpers.file_exists(readings_filename)
   with open(readings_filename, "a") as f:
     if new_file:
@@ -347,6 +347,10 @@ def cache_upload(readings):
 # return the number of cached results waiting to be uploaded
 def cached_upload_count():
   return len(os.listdir("uploads"))
+
+# return the number of local results files waiting to be uploaded
+def local_readings_count():
+  return len(os.listdir("readings"))
 
 # returns True if we have more cached uploads than our config allows
 def is_upload_needed():
@@ -395,6 +399,65 @@ def upload_readings():
 
   return True
 
+# upload locally saved readings to the configured destination
+def upload_readings_local():
+  if not connect_to_wifi():
+    logging.error(f"  - cannot upload readings, wifi connection failed")
+    return False
+
+  destination = config.destination
+  try:
+    exec(f"import enviro.destinations.{destination}")
+    destination_module = sys.modules[f"enviro.destinations.{destination}"]
+    destination_module.log_destination()
+
+    for local_file in os.ilistdir("readings"):
+      try:
+        with open(f"readings/{local_file[0]}", "r") as upload_file:
+          allreadings = []
+          # get column headings
+          headings = upload_file.readline().rstrip('\n').split(',')
+          # and assume first is timestamp
+          headings.pop(0)
+          for line in upload_file:
+            data = line.rstrip('\n').split(',')
+            readings = {
+              "nickname": config.nickname,
+              "timestamp": data.pop(0),
+              "readings": dict(zip(headings, data)),
+              "model": model,
+              "uid": helpers.uid()
+            }
+            allreadings.append(readings)
+            
+          status = destination_module.upload_reading(allreadings)
+          if status == UPLOAD_SUCCESS:
+            os.remove(f"readings/{local_file[0]}")
+            logging.info(f"  - uploaded {local_file[0]}")
+          elif status == UPLOAD_RATE_LIMITED:
+            # write out that we want to attempt a reupload
+            with open("reattempt_upload_local.txt", "w") as attemptfile:
+              attemptfile.write("")
+
+            logging.info(f"  - rate limited, going to sleep for 1 minute")
+            sleep(1)
+          else:
+            logging.error(f"  ! failed to upload '{local_file[0]}' to {destination}")
+            return False
+
+      except OSError:
+        logging.error(f"  ! failed to open '{local_file[0]}'")
+        return False
+
+      except KeyError:
+        logging.error(f"  ! skipping '{local_file[0]}' as it is missing data. It was likely created by an older version of the enviro firmware")
+        
+  except ImportError:
+    logging.error(f"! cannot find destination {destination}")
+    return False
+
+  return True
+
 def startup():
   # write startup banner into log file
   logging.debug("> performing startup")
@@ -426,6 +489,18 @@ def startup():
 
     logging.info(f"> {cached_upload_count()} cache file(s) still to upload")
     if not upload_readings():
+      halt("! reading upload failed")
+
+    # if it was the RTC that woke us, go to sleep until our next scheduled reading
+    # otherwise continue with taking new readings etc
+    # Note, this *may* result in a missed reading
+    if reason == WAKE_REASON_RTC_ALARM:
+      sleep()
+  elif helpers.file_exists("reattempt_upload_local.txt"):
+    os.remove("reattempt_upload_local.txt")
+
+    logging.info(f"> {local_readings_count()} readings file(s) still to upload")
+    if not upload_readings_local():
       halt("! reading upload failed")
 
     # if it was the RTC that woke us, go to sleep until our next scheduled reading
