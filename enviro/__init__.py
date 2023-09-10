@@ -383,77 +383,18 @@ def save_reading(readings):
       row.append(str(readings[key]))
     f.write(",".join(row) + "\r\n")
 
-
-# save the provided readings into a cache file for future uploading
-def cache_upload(readings):
-  payload = {
-    "nickname": config.nickname,
-    "timestamp": helpers.datetime_string(),
-    "readings": readings,
-    "model": model,
-    "uid": helpers.uid()
-  }
-
-  uploads_filename = f"uploads/{helpers.datetime_file_string()}.json"
-  helpers.mkdir_safe("uploads")
-  with open(uploads_filename, "w") as upload_file:
-    #json.dump(payload, upload_file) # TODO what it was changed to
-    upload_file.write(ujson.dumps(payload))
-
-# return the number of cached results waiting to be uploaded
-def cached_upload_count():
-  return len(os.listdir("uploads"))
-
-# return the number of local results files waiting to be uploaded
+# return the number of local readings waiting to be uploaded
 def local_readings_count():
-  return len(os.listdir("readings"))
+  numreadings = 0
+  for local_file in os.ilistdir("readings"):
+    with open(f"readings/{local_file[0]}", "r") as upload_file:
+      numreadings += len(upload_file.readlines()) - 1
+
+  return numreadings
 
 # returns True if we have more cached uploads than our config allows
 def is_upload_needed():
-  return cached_upload_count() >= config.upload_frequency
-
-# upload cached readings to the configured destination
-def upload_readings():
-  if not connect_to_wifi():
-    logging.error(f"  - cannot upload readings, wifi connection failed")
-    return False
-
-  destination = config.destination
-  try:
-    exec(f"import enviro.destinations.{destination}")
-    destination_module = sys.modules[f"enviro.destinations.{destination}"]
-    destination_module.log_destination()
-
-    for cache_file in os.ilistdir("uploads"):
-      try:
-        with open(f"uploads/{cache_file[0]}", "r") as upload_file:
-          status = destination_module.upload_reading(ujson.load(upload_file))
-          if status == UPLOAD_SUCCESS:
-            os.remove(f"uploads/{cache_file[0]}")
-            logging.info(f"  - uploaded {cache_file[0]}")
-          elif status == UPLOAD_RATE_LIMITED:
-            # write out that we want to attempt a reupload
-            with open("reattempt_upload.txt", "w") as attemptfile:
-              attemptfile.write("")
-
-            logging.info(f"  - rate limited, going to sleep for 1 minute")
-            sleep(1)
-          else:
-            logging.error(f"  ! failed to upload '{cache_file[0]}' to {destination}")
-            return False
-
-      except OSError:
-        logging.error(f"  ! failed to open '{cache_file[0]}'")
-        return False
-
-      except KeyError:
-        logging.error(f"  ! skipping '{cache_file[0]}' as it is missing data. It was likely created by an older version of the enviro firmware")
-        
-  except ImportError:
-    logging.error(f"! cannot find destination {destination}")
-    return False
-
-  return True
+  return config.upload_frequency >= 1 and local_readings_count() >= config.upload_frequency
 
 # upload locally saved readings to the configured destination
 def upload_readings_local():
@@ -539,23 +480,10 @@ def startup():
   logging.debug("  - turn on activity led")
   pulse_activity_led(0.5)
 
-  # see if we were woken to attempt a reupload
-  if helpers.file_exists("reattempt_upload.txt"):
-    os.remove("reattempt_upload.txt")
-
-    logging.info(f"> {cached_upload_count()} cache file(s) still to upload")
-    if not upload_readings():
-      halt("! reading upload failed")
-
-    # if it was the RTC that woke us, go to sleep until our next scheduled reading
-    # otherwise continue with taking new readings etc
-    # Note, this *may* result in a missed reading
-    if reason == WAKE_REASON_RTC_ALARM:
-      sleep()
-  elif helpers.file_exists("reattempt_upload_local.txt"):
+  if helpers.file_exists("reattempt_upload_local.txt"):
     os.remove("reattempt_upload_local.txt")
 
-    logging.info(f"> {local_readings_count()} readings file(s) still to upload")
+    logging.info(f"> {local_readings_count()} readings still to upload")
     if not upload_readings_local():
       halt("! reading upload failed")
 

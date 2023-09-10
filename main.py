@@ -60,29 +60,26 @@ try:
   #
   #   readings["custom"] = my_reading()  # add my custom reading value
 
-  # is an upload destination and frequency set?
-  if enviro.config.destination and enviro.config.upload_frequency >= 1:
-    # if so cache this reading for upload later
-    enviro.logging.debug(f"> caching reading for upload")
-    enviro.cache_upload(reading)
+  # save reading to local csv file (look in "/readings")
+  enviro.logging.debug(f"> saving reading locally")
+  enviro.save_reading(reading)
 
-    # if we have enough cached uploads...
-    if enviro.is_upload_needed():
-      enviro.logging.info(f"> {enviro.cached_upload_count()} cache file(s) need uploading")
-      if not enviro.upload_readings():
-        enviro.halt("! reading upload failed")
-    else:
-      enviro.logging.info(f"> {enviro.cached_upload_count()} cache file(s) not being uploaded. Waiting until there are {enviro.config.upload_frequency} file(s)")
-  else:
-    # otherwise save reading to local csv file (look in "/readings")
-    enviro.logging.debug(f"> saving reading locally")
-    enviro.save_reading(reading)
-    # and upload on demand
-    if enviro.config.destination and enviro.config.upload_frequency == -1 and enviro.get_wake_reason() == enviro.constants.WAKE_REASON_BUTTON_PRESS:
-      enviro.logging.info(f"> local readings upload requested")
+  # is an upload destination set?
+  if enviro.config.destination:
+    numreadings = enviro.local_readings_count()
+    if enviro.config.upload_frequency == -1 and enviro.get_wake_reason() == enviro.constants.WAKE_REASON_BUTTON_PRESS:
+    # upload on demand
+      enviro.logging.info(f"> {numreadings} local readings upload requested")
       if not enviro.upload_readings_local():
         enviro.halt("! local readings upload failed")
-            
+    else:
+      if enviro.is_upload_needed():
+        enviro.logging.info(f"> {numreadings} readings need uploading")
+        if not enviro.upload_readings_local():
+          enviro.halt("! reading upload failed")
+      else:
+        enviro.logging.info(f"> {numreadings} readings not being uploaded. Waiting until there are {enviro.config.upload_frequency} readings")
+           
 
   # go to sleep until our next scheduled reading
   enviro.sleep()
