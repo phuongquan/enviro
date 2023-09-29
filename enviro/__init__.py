@@ -431,6 +431,9 @@ def upload_readings_local():
           if status == UPLOAD_SUCCESS:
             os.remove(f"readings/{local_file[0]}")
             logging.info(f"  - uploaded {local_file[0]}")
+            # if there are more files to post, wait for destination to finish updating
+            if len(os.listdir("readings")) > 0:
+              time.sleep(5)
           elif status == UPLOAD_RATE_LIMITED:
             # write out that we want to attempt a reupload
             with open("reattempt_upload_local.txt", "w") as attemptfile:
