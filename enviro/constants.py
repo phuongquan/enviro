@@ -18,6 +18,8 @@ RAIN_PIN                      = 10
 
 # system pins
 WIFI_CS_PIN                   = 25
+# from https://github.com/pimoroni/enviro/issues/145
+WIFI_CLK_ADC_PIN              = 29
 
 # wake reasons
 WAKE_REASON_UNKNOWN           = None

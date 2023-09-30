@@ -102,23 +102,29 @@ import enviro.helpers as helpers
 # read the state of vbus to know if we were woken up by USB
 vbus_present = Pin("WL_GPIO2", Pin.IN).value()
 
-#BUG Temporarily disabling battery reading, as it seems to cause issues when connected to Thonny
-"""
-# read battery voltage - we have to toggle the wifi chip select
-# pin to take the reading - this is probably not ideal but doesn't
-# seem to cause issues. there is no obvious way to shut down the
-# wifi for a while properly to do this (wlan.disonnect() and
-# wlan.active(False) both seem to mess things up big style..)
-old_state = Pin(WIFI_CS_PIN).value()
-Pin(WIFI_CS_PIN, Pin.OUT, value=True)
-sample_count = 10
+# from https://github.com/pimoroni/enviro/issues/145
+import network
+wlan=network.WLAN()
+wlan.disconnect()
+wlan.active(False)
+wlan.deinit()
+
+def setPadCtr(gpio, value):
+    machine.mem32[0x4001c000 | (4 + (4 * gpio))] = value
+
+def getPadCtr(gpio):
+    return machine.mem32[0x4001c000 | (4 + (4 * gpio))]
+
+padCtrSave = getPadCtr(WIFI_CLK_ADC_PIN)
+setPadCtr(WIFI_CLK_ADC_PIN, 0x80)
+time.sleep_us(1000)  ## alow voltage to settle after reconnect
+sample_count = 4
 battery_voltage = 0
 for i in range(0, sample_count):
-  battery_voltage += (ADC(29).read_u16() * 3.3 / 65535) * 3
+    battery_voltage += (ADC(WIFI_CLK_ADC_PIN).read_u16() * 3.3 / 65535) * 3
 battery_voltage /= sample_count
 battery_voltage = round(battery_voltage, 3)
-Pin(WIFI_CS_PIN).value(old_state)
-"""
+setPadCtr(WIFI_CLK_ADC_PIN,padCtrSave)
 
 # set up the button, external trigger, and rtc alarm pins
 rtc_alarm_pin = Pin(RTC_ALARM_PIN, Pin.IN, Pin.PULL_DOWN)
@@ -151,7 +157,6 @@ print("    -  --  ---- -----=--==--===  hey enviro, let's go!  ===--==--=----- -
 print("")
 
 
-import network # TODO this was removed from 0.0.8
 # from https://github.com/pimoroni/enviro/issues/173
 def connect_to_wifi():
   try:
@@ -169,9 +174,6 @@ def connect_to_wifi():
 
 # from https://github.com/pimoroni/enviro/issues/173
 def reconnect_wifi(ssid, password, country):
-    import time
-    import network
-    import math
     import rp2
     import ubinascii
     
@@ -358,7 +360,7 @@ def get_sensor_readings():
 
 
   readings = get_board().get_sensor_readings(seconds_since_last)
-  readings["voltage"] = 0.0 # battery_voltage #Temporarily removed until issue is fixed
+  readings["voltage"] = battery_voltage
 
   # write out the last time log
   with open("last_time.txt", "w") as timefile:
@@ -413,11 +415,11 @@ def upload_readings_local():
         with open(f"readings/{local_file[0]}", "r") as upload_file:
           allreadings = []
           # get column headings
-          headings = upload_file.readline().rstrip('\n').split(',')
+          headings = upload_file.readline().rstrip('\n').rstrip('\r').split(',')
           # and assume first is timestamp
           headings.pop(0)
           for line in upload_file:
-            data = line.rstrip('\n').split(',')
+            data = line.rstrip('\n').rstrip('\r').split(',')
             readings = {
               "nickname": config.nickname,
               "timestamp": data.pop(0),
